@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from typing import Sequence
 
 from aiogram import Bot
@@ -17,12 +17,11 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, LinkPrevie
 
 from .config import Settings
 from .db import Database, TelegramUser
-from .formatting import escape, format_user, shorten
+from .formatting import MSK, escape, format_user, shorten
 from .texts import NOTIFY_NO_MANAGERS
 
 logger = logging.getLogger(__name__)
 
-MSK = timezone(timedelta(hours=3))
 MAX_VALUE_CHARS = 700
 
 
@@ -64,12 +63,8 @@ class ManagerNotifier:
             return 0
 
         text = self._render(title=title, user=user, details=details)
-        if reply_markup is None and user and user.username:
-            reply_markup = InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [InlineKeyboardButton(text="✍️ Написать пользователю", url=f"https://t.me/{user.username}")]
-                ]
-            )
+        if reply_markup is None:
+            reply_markup = self._default_keyboard(user)
 
         sent = 0
         for chat_id in chat_ids:
@@ -104,6 +99,16 @@ class ManagerNotifier:
         except TelegramAPIError as error:
             logger.warning("Не удалось отправить сообщение в %s: %s", chat_id, error)
             return False
+
+    def _default_keyboard(self, user: TelegramUser | None) -> InlineKeyboardMarkup | None:
+        """Кнопки под уведомлением: написать пользователю и открыть его историю."""
+        if user is None:
+            return None
+        row: list[InlineKeyboardButton] = []
+        if user.username:
+            row.append(InlineKeyboardButton(text="✍️ Написать", url=f"https://t.me/{user.username}"))
+        row.append(InlineKeyboardButton(text="📜 История запросов", callback_data=f"hist:{user.id}:0"))
+        return InlineKeyboardMarkup(inline_keyboard=[row])
 
     def _render(
         self,

@@ -16,6 +16,7 @@ from .config import Settings
 from .db import Database
 from .dialogue import DialogueHistory
 from .handlers import admin, audit, chat, menu, start
+from .handlers import history as history_handlers
 from .llm import EmbeddingClient, LLMClient
 from .notifications import ManagerNotifier
 from .rag.retriever import RAGService
@@ -27,7 +28,6 @@ COMMANDS = [
     BotCommand(command="audit", description="Экспресс-аудит — бесплатно"),
     BotCommand(command="help", description="Как пользоваться ботом"),
     BotCommand(command="reset", description="Очистить историю диалога"),
-    BotCommand(command="id", description="Мой Telegram ID"),
 ]
 
 
@@ -71,6 +71,7 @@ async def main() -> None:
         start.router,
         audit.router,
         menu.router,
+        history_handlers.router,
         chat.router,
     )
     dispatcher["settings"] = settings

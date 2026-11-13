@@ -4,12 +4,27 @@ from __future__ import annotations
 
 import html
 import re
+from datetime import datetime, timedelta, timezone
 
 from .db import TelegramUser
+
+MSK = timezone(timedelta(hours=3))
 
 
 def escape(value: object) -> str:
     return html.escape(str(value), quote=False)
+
+
+def format_datetime(value: datetime | str, fmt: str = "%d.%m.%Y %H:%M") -> str:
+    """Показывает время в МСК независимо от того, как оно хранится."""
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return value
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(MSK).strftime(fmt)
 
 
 def shorten(text: str, limit: int) -> str:

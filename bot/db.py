@@ -269,6 +269,24 @@ class Database:
         with self._lock:
             return int(self._conn.execute(sql, params).fetchone()[0])
 
+    def question_history(self, user_id: int, limit: int = 10, offset: int = 0) -> list[dict[str, Any]]:
+        """Последние вопросы пользователя (для карточки у менеджеров)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT question, created_at, top_score FROM query_log "
+                "WHERE user_id = ? ORDER BY id DESC LIMIT ? OFFSET ?",
+                (user_id, limit, max(0, offset)),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def find_user_by_username(self, username: str) -> int | None:
+        value = username.strip().lstrip("@")
+        if not value:
+            return None
+        with self._lock:
+            row = self._conn.execute("SELECT id FROM users WHERE lower(username) = lower(?)", (value,)).fetchone()
+        return int(row["id"]) if row else None
+
     # ------------------------------------------------------------------ leads
 
     def create_lead(
@@ -290,17 +308,43 @@ class Database:
             )
             return int(cursor.lastrowid)
 
-    def list_leads(self, limit: int = 10, status: str | None = None) -> list[dict[str, Any]]:
+    def list_leads(
+        self,
+        limit: int = 10,
+        status: str | None = None,
+        user_id: int | None = None,
+    ) -> list[dict[str, Any]]:
         sql = "SELECT * FROM leads"
+        clauses: list[str] = []
         params: list[Any] = []
         if status:
-            sql += " WHERE status = ?"
+            clauses.append("status = ?")
             params.append(status)
+        if user_id is not None:
+            clauses.append("user_id = ?")
+            params.append(user_id)
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
         sql += " ORDER BY id DESC LIMIT ?"
         params.append(limit)
         with self._lock:
             rows = self._conn.execute(sql, params).fetchall()
         return [dict(row) for row in rows]
+
+    def leads_count(self, user_id: int | None = None, status: str | None = None) -> int:
+        sql = "SELECT COUNT(*) FROM leads"
+        clauses: list[str] = []
+        params: list[Any] = []
+        if user_id is not None:
+            clauses.append("user_id = ?")
+            params.append(user_id)
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        with self._lock:
+            return int(self._conn.execute(sql, params).fetchone()[0])
 
     def set_lead_status(self, lead_id: int, status: str) -> bool:
         with self._lock, self._conn:

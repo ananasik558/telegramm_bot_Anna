@@ -36,8 +36,25 @@ def test_user_lead_and_knowledge_flow(tmp_path) -> None:
     assert db.fetch_chunks("other-model")[0].embedding is None
 
     db.log_question(1, "Что такое Search?", "Ответ", ["https://ensi.cloud/search"], 0.9)
-    assert db.recent_questions(1) == ["Что такое Search?"]
-    assert db.questions_count(1) == 1
+    db.log_question(1, "А сколько стоит?", "Ответ", [], 0.8)
+    assert db.recent_questions(1) == ["А сколько стоит?", "Что такое Search?"]
+    assert db.questions_count(1) == 2
+
+    history = db.question_history(1, limit=1)
+    assert len(history) == 1
+    assert history[0]["question"] == "А сколько стоит?"
+    assert db.question_history(1, limit=1, offset=1)[0]["question"] == "Что такое Search?"
+    assert db.question_history(999) == []
+
+    assert db.find_user_by_username("ivan") == 1
+    assert db.find_user_by_username("@IVAN") == 1
+    assert db.find_user_by_username("nobody") is None
+
+    assert db.leads_count() == 1
+    assert db.leads_count(user_id=1) == 1
+    assert db.leads_count(user_id=2) == 0
+    assert db.list_leads(user_id=1)[0]["id"] == lead_id
+    assert db.list_leads(user_id=2) == []
 
     db.reset_knowledge()
     assert db.stats()["chunks"] == 0
