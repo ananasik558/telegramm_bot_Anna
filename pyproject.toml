@@ -1,0 +1,14 @@
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+exclude = [".venv", "venv", "data", ".git"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = [
+    "E501",   # длину строк контролирует formatter/ревью
+    "UP017",  # timezone.utc читается привычнее datetime.UTC
+    "UP035",  # typing.Sequence в этом проекте осознанно
+    "UP037",  # кавычки в аннотациях не мешают
+    "UP041",  # asyncio.TimeoutError == TimeoutError
+]
