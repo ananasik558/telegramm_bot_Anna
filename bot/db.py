@@ -79,6 +79,12 @@ CREATE TABLE IF NOT EXISTS chunks (
     created_at       TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_url ON chunks (url);
+
+CREATE TABLE IF NOT EXISTS kv (
+    key         TEXT PRIMARY KEY,
+    value       TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
 """
 
 
@@ -350,6 +356,21 @@ class Database:
         with self._lock, self._conn:
             cursor = self._conn.execute("UPDATE leads SET status = ? WHERE id = ?", (status, lead_id))
             return cursor.rowcount > 0
+
+    # ------------------------------------------------------------- key/value
+
+    def get_setting(self, key: str) -> str | None:
+        with self._lock:
+            row = self._conn.execute("SELECT value FROM kv WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else None
+
+    def set_setting(self, key: str, value: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO kv (key, value, updated_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                (key, value, iso_now()),
+            )
 
     # -------------------------------------------------------------- knowledge
 

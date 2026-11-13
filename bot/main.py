@@ -10,8 +10,8 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import BotCommand
 
+from .commands import apply_command_scopes
 from .config import Settings
 from .db import Database
 from .dialogue import DialogueHistory
@@ -22,13 +22,6 @@ from .notifications import ManagerNotifier
 from .rag.retriever import RAGService
 
 logger = logging.getLogger(__name__)
-
-COMMANDS = [
-    BotCommand(command="start", description="Начать"),
-    BotCommand(command="audit", description="Экспресс-аудит — бесплатно"),
-    BotCommand(command="help", description="Как пользоваться ботом"),
-    BotCommand(command="reset", description="Очистить историю диалога"),
-]
 
 
 def setup_logging(level: str) -> None:
@@ -93,8 +86,14 @@ async def main() -> None:
     )
 
     try:
-        await bot.set_my_commands(COMMANDS)
         await bot.delete_webhook(drop_pending_updates=True)
+        scopes = await apply_command_scopes(bot, settings, db)
+        logger.info(
+            "Меню команд: публичное для всех, персональное для %s из %s сотрудников (сброшено %s)",
+            scopes["applied"],
+            scopes["expected"],
+            scopes["removed"],
+        )
         await dispatcher.start_polling(bot)
     finally:
         logger.info("Остановка бота")

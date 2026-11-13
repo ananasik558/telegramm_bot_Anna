@@ -20,3 +20,9 @@ def is_staff(
     if not allowed:
         return False
     return bool((user_id is not None and user_id in allowed) or (chat_id is not None and chat_id in allowed))
+
+
+def is_admin(*, user_id: int | None, chat_id: int | None, settings: Settings) -> bool:
+    """Админские команды: достаточно личного ID админа или админского чата."""
+    admins = set(settings.admins)
+    return bool((user_id is not None and user_id in admins) or (chat_id is not None and chat_id in admins))

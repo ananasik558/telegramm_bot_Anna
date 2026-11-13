@@ -56,6 +56,12 @@ def test_user_lead_and_knowledge_flow(tmp_path) -> None:
     assert db.list_leads(user_id=1)[0]["id"] == lead_id
     assert db.list_leads(user_id=2) == []
 
+    assert db.get_setting("missing") is None
+    db.set_setting("staff_scopes", "[111, 222]")
+    assert db.get_setting("staff_scopes") == "[111, 222]"
+    db.set_setting("staff_scopes", "[]")
+    assert db.get_setting("staff_scopes") == "[]"
+
     db.reset_knowledge()
     assert db.stats()["chunks"] == 0
     db.close()
