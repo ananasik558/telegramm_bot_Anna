@@ -62,6 +62,8 @@ class Settings(BaseSettings):
     # Уведомление «изучает бота»: больше N вопросов или N минут тишины.
     n_questions: int = Field(default=5, ge=0)
     view_notify_idle_minutes: float = Field(default=5.0, ge=0)
+    # Период по умолчанию для админской команды /users.
+    n_days: int = Field(default=7, ge=1)
 
     # --- LLM (OpenAI-совместимый API) ---
     llm_api_key: str = ""
@@ -77,6 +79,8 @@ class Settings(BaseSettings):
 
     # --- RAG / сайт ---
     site_base_url: str = "https://ensi.cloud"
+    # Дополнительные сайты-источники знаний (через запятую).
+    extra_sites: str = "https://ensi.tech"
     seed_urls: str = ""
     db_path: Path = Field(default=Path("data/bot.sqlite3"))
     rag_top_k: int = 5
@@ -112,8 +116,21 @@ class Settings(BaseSettings):
         return self.embeddings_enabled and self.llm_enabled
 
     @property
-    def seeds(self) -> list[str]:
-        if self.seed_urls.strip():
-            return [url for url in re.split(r"[,\s]+", self.seed_urls.strip()) if url]
-        base = self.site_base_url.rstrip("/")
-        return [f"{base}{path}" for path in DEFAULT_SEED_PATHS]
+    def knowledge_sites(self) -> list[str]:
+        """Основной сайт + EXTRA_SITES, без дублей."""
+        raw = [self.site_base_url, *re.split(r"[,\s]+", self.extra_sites.strip())]
+        sites: list[str] = []
+        for url in raw:
+            url = url.strip().rstrip("/")
+            if not url:
+                continue
+            if not url.startswith(("http://", "https://")):
+                url = f"https://{url}"
+            if url not in sites:
+                sites.append(url)
+        return sites
+
+    @property
+    def custom_seeds(self) -> list[str]:
+        """SEED_URLS: если заданы, инжест берёт только эти страницы."""
+        return [url for url in re.split(r"[,\s]+", self.seed_urls.strip()) if url]

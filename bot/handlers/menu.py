@@ -30,10 +30,14 @@ def _telegram_url(handle: str) -> str:
 @router.callback_query(F.data == "menu:products")
 async def cb_products(callback: CallbackQuery, settings: Settings) -> None:
     await callback.answer()
+    platform_url = None
+    extras = settings.knowledge_sites[1:]
+    if extras:
+        platform_url = f"{extras[0]}/solutions"
     if callback.message is not None:
         await callback.message.answer(
             PRODUCTS_TEXT,
-            reply_markup=products_menu(settings.site_base_url),
+            reply_markup=products_menu(settings.site_base_url, platform_url),
         )
 
 

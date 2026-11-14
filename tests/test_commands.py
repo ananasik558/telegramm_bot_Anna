@@ -28,6 +28,7 @@ def test_manager_gets_staff_menu_without_admin_commands() -> None:
     assert commands is STAFF_COMMANDS
     assert {"history", "id"} <= _names(commands)
     assert "stats" not in _names(commands)
+    assert "users" not in _names(commands)
     assert "test_notify" not in _names(commands)
 
 
@@ -35,7 +36,7 @@ def test_admin_gets_full_menu() -> None:
     settings = _settings(admin_ids="999")
     commands = staff_commands_for(999, settings)
     assert commands is ADMIN_COMMANDS
-    assert {"history", "id", "stats", "leads", "knowledge", "test_notify"} <= _names(commands)
+    assert {"history", "id", "stats", "users", "leads", "knowledge", "test_notify"} <= _names(commands)
 
 
 def test_admin_menu_wins_over_manager() -> None:

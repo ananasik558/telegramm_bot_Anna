@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from bot.db import Database, NewChunk, TelegramUser
+from datetime import timedelta
+
+from bot.db import Database, NewChunk, TelegramUser, utc_now
 
 
 def test_user_lead_and_knowledge_flow(tmp_path) -> None:
@@ -61,6 +63,16 @@ def test_user_lead_and_knowledge_flow(tmp_path) -> None:
     assert db.get_setting("staff_scopes") == "[111, 222]"
     db.set_setting("staff_scopes", "[]")
     assert db.get_setting("staff_scopes") == "[]"
+
+    since_yesterday = utc_now() - timedelta(days=1)
+    active = db.active_users(since_yesterday)
+    assert [user["id"] for user in active] == [1]
+    assert active[0]["questions"] == 2
+    assert db.active_users_count(since_yesterday) == 1
+
+    since_tomorrow = utc_now() + timedelta(days=1)
+    assert db.active_users(since_tomorrow) == []
+    assert db.active_users_count(since_tomorrow) == 0
 
     db.reset_knowledge()
     assert db.stats()["chunks"] == 0

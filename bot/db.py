@@ -293,6 +293,28 @@ class Database:
             row = self._conn.execute("SELECT id FROM users WHERE lower(username) = lower(?)", (value,)).fetchone()
         return int(row["id"]) if row else None
 
+    def active_users(self, since: datetime, limit: int = 30, offset: int = 0) -> list[dict[str, Any]]:
+        """Пользователи, проявлявшие активность с указанного момента."""
+        since_iso = since.isoformat(timespec="seconds")
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT u.id, u.username, u.first_name, u.last_name, u.last_seen_at, "
+                "(SELECT COUNT(*) FROM query_log q "
+                " WHERE q.user_id = u.id AND q.created_at >= ?) AS questions "
+                "FROM users u WHERE u.last_seen_at >= ? "
+                "ORDER BY u.last_seen_at DESC LIMIT ? OFFSET ?",
+                (since_iso, since_iso, limit, max(0, offset)),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def active_users_count(self, since: datetime) -> int:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM users WHERE last_seen_at >= ?",
+                (since.isoformat(timespec="seconds"),),
+            ).fetchone()
+        return int(row[0])
+
     # ------------------------------------------------------------------ leads
 
     def create_lead(

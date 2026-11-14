@@ -39,6 +39,7 @@ STAFF_COMMANDS: list[BotCommand] = [
 ADMIN_COMMANDS: list[BotCommand] = [
     *STAFF_COMMANDS,
     BotCommand(command="stats", description="Статистика бота"),
+    BotCommand(command="users", description="Кто писал боту за N дней"),
     BotCommand(command="leads", description="Последние заявки"),
     BotCommand(command="knowledge", description="Состояние базы знаний"),
     BotCommand(command="test_notify", description="Проверить уведомления"),

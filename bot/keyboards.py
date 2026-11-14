@@ -42,7 +42,7 @@ def answer_menu(sources: list[Source], site_url: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def products_menu(site_url: str) -> InlineKeyboardMarkup:
+def products_menu(site_url: str, platform_url: str | None = None) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     pair: list[InlineKeyboardButton] = []
     for label, path in PRODUCT_LINKS:
@@ -52,6 +52,8 @@ def products_menu(site_url: str) -> InlineKeyboardMarkup:
             pair = []
     if pair:
         rows.append(pair)
+    if platform_url:
+        rows.append([InlineKeyboardButton(text="🏗 Платформа Ensi", url=platform_url)])
     rows.append([InlineKeyboardButton(text="🚀 Экспресс-аудит", callback_data="audit:start")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

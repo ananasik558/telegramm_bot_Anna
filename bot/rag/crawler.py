@@ -24,6 +24,9 @@ EXCLUDE_PATH_PATTERNS = (
     r"/programming_languages/?$",
     r"/soglasie[^/]*/?$",
     r"/search-results/?$",
+    r"/resources/logos/?$",
+    r"/contacts/[^/]+/?$",
+    r"/hraderlogo/?$",
 )
 
 _BINARY_EXTENSIONS = (
@@ -103,17 +106,22 @@ class Page:
 
 
 def normalize_url(url: str) -> str | None:
-    """Убирает якоря/query и приводит URL к каноничному виду."""
+    """Убирает якоря/query и приводит URL к каноничному виду.
+
+    Tilda-сайты работают по HTTPS и не различают регистр пути, поэтому
+    http-ссылки и варианты вроде /solutions/DIY не должны плодить дубликаты.
+    """
     clean, _ = urldefrag(url.strip())
     parsed = urlparse(clean)
     if parsed.scheme not in ("http", "https"):
         return None
     if parsed.path.lower().endswith(_BINARY_EXTENSIONS):
         return None
-    path = parsed.path or "/"
+    host = parsed.netloc.lower()
+    path = (parsed.path or "/").lower()
     if path != "/":
         path = path.rstrip("/")
-    return f"{parsed.scheme}://{parsed.netloc}{path}"
+    return f"https://{host}{path}"
 
 
 def _host(url: str) -> str:
@@ -238,7 +246,7 @@ class SiteCrawler:
                 return False
         return True
 
-    async def _fetch(self, url: str) -> str | None:
+    async def _fetch(self, url: str) -> tuple[str, str] | None:
         try:
             async with self._session.get(
                 url,
@@ -257,7 +265,8 @@ class SiteCrawler:
                 if len(body) > 3_000_000:
                     logger.warning("Пропуск %s: слишком большая страница", url)
                     return None
-                return body
+                final_url = normalize_url(str(response.url)) or url
+                return final_url, body
         except (TimeoutError, aiohttp.ClientError) as error:
             logger.warning("Ошибка загрузки %s: %s", url, error)
             return None
@@ -288,7 +297,15 @@ class SiteCrawler:
             if html is None:
                 continue
 
-            page = extract_page(html, url)
+            final_url, html_body = html
+            if final_url in seen and final_url != url:
+                continue
+            if not self.in_scope(final_url):
+                logger.debug("Пропуск %s: редирект вне сайта (%s)", url, final_url)
+                continue
+            seen.add(final_url)
+
+            page = extract_page(html_body, final_url)
             fetched += 1
             yield page
 

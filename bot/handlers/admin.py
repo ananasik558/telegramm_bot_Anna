@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 
 from aiogram import Router
 from aiogram.filters import Command, CommandObject
-from aiogram.types import Message
+from aiogram.types import LinkPreviewOptions, Message
 
 from ..config import Settings
-from ..db import Database, TelegramUser
-from ..formatting import escape, shorten
+from ..db import Database, TelegramUser, utc_now
+from ..formatting import escape, format_datetime, shorten
 from ..notifications import ManagerNotifier
 from ..rag.retriever import RAGService
-from ..texts import ADMIN_ONLY, LEADS_EMPTY
+from ..texts import ADMIN_ONLY, LEADS_EMPTY, USERS_EMPTY, USERS_USAGE
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin")
@@ -21,6 +22,18 @@ router = Router(name="admin")
 
 def _is_admin(message: Message, settings: Settings) -> bool:
     return message.from_user is not None and message.from_user.id in settings.admins
+
+
+def _plural(number: int, one: str, few: str, many: str) -> str:
+    n = abs(number) % 100
+    if 11 <= n <= 14:
+        return many
+    n %= 10
+    if n == 1:
+        return one
+    if 2 <= n <= 4:
+        return few
+    return many
 
 
 @router.message(Command("stats"))
@@ -83,6 +96,56 @@ async def cmd_leads(
             f"💬 {escape(shorten(lead['comment'] or '—', 200))}"
         )
     await message.answer("\n".join(blocks))
+
+
+@router.message(Command("users"))
+async def cmd_users(
+    message: Message,
+    command: CommandObject,
+    db: Database,
+    settings: Settings,
+) -> None:
+    if not _is_admin(message, settings):
+        await message.answer(ADMIN_ONLY)
+        return
+
+    days = settings.n_days
+    args = (command.args or "").strip()
+    if args:
+        try:
+            days = int(args.split()[0])
+        except ValueError:
+            await message.answer(USERS_USAGE.format(default=settings.n_days))
+            return
+    days = max(1, min(days, 365))
+
+    since = utc_now() - timedelta(days=days)
+    total = db.active_users_count(since)
+    if not total:
+        await message.answer(USERS_EMPTY.format(days=days))
+        return
+
+    users = db.active_users(since, limit=30)
+    lines: list[str] = [f"<b>👥 Писали боту за {days} дн.: {total}</b>", ""]
+    for index, user in enumerate(users, start=1):
+        name = " ".join(part for part in (user.get("first_name"), user.get("last_name")) if part).strip() or "без имени"
+        handle = f"@{escape(user['username'])}" if user.get("username") else "без username"
+        questions = int(user.get("questions") or 0)
+        lines.append(
+            f'{index}. <a href="tg://user?id={user["id"]}">{escape(shorten(name, 40))}</a> · '
+            f"{handle} · id <code>{user['id']}</code> · "
+            f"{questions} {_plural(questions, 'вопрос', 'вопроса', 'вопросов')} · "
+            f"{format_datetime(user['last_seen_at'], '%d.%m %H:%M')}"
+        )
+
+    if total > len(users):
+        lines.append("")
+        lines.append(f"<i>Показаны последние {len(users)}. Уточните период: /users 30</i>")
+
+    await message.answer(
+        "\n".join(lines),
+        link_preview_options=LinkPreviewOptions(is_disabled=True),
+    )
 
 
 @router.message(Command("knowledge"))
