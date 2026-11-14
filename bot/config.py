@@ -59,7 +59,9 @@ class Settings(BaseSettings):
 
     notify_on_signup: bool = True
     notify_on_view: bool = True
-    view_notify_cooldown_hours: float = 6.0
+    # Уведомление «изучает бота»: больше N вопросов или N минут тишины.
+    n_questions: int = Field(default=5, ge=0)
+    view_notify_idle_minutes: float = Field(default=5.0, ge=0)
 
     # --- LLM (OpenAI-совместимый API) ---
     llm_api_key: str = ""

@@ -20,6 +20,7 @@ from .handlers import history as history_handlers
 from .llm import EmbeddingClient, LLMClient
 from .notifications import ManagerNotifier
 from .rag.retriever import RAGService
+from .services.view_notifier import ViewNotifier
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,7 @@ async def main() -> None:
 
     notifier = ManagerNotifier(bot, settings, db)
     history = DialogueHistory(settings.history_turns)
+    view_notifier = ViewNotifier(notifier, db, settings)
 
     dispatcher = Dispatcher(storage=MemoryStorage())
     dispatcher.include_routers(
@@ -72,6 +74,7 @@ async def main() -> None:
     dispatcher["rag"] = rag
     dispatcher["notifier"] = notifier
     dispatcher["history"] = history
+    dispatcher["view_notifier"] = view_notifier
 
     if not rag.ready:
         logger.warning("База знаний пуста. Выполните: python -m bot.rag.ingest")
@@ -97,6 +100,7 @@ async def main() -> None:
         await dispatcher.start_polling(bot)
     finally:
         logger.info("Остановка бота")
+        await view_notifier.shutdown()
         await http.close()
         await bot.session.close()
         db.close()

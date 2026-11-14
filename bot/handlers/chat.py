@@ -12,9 +12,8 @@ from ..config import Settings
 from ..db import Database, TelegramUser
 from ..dialogue import DialogueHistory
 from ..keyboards import answer_menu, main_menu
-from ..notifications import ManagerNotifier
 from ..rag.retriever import RAGService
-from ..services.analytics import maybe_notify_view
+from ..services.view_notifier import ViewNotifier
 from ..texts import (
     NON_TEXT_REPLY,
     RATE_LIMIT_REPLY,
@@ -43,7 +42,7 @@ async def on_question(
     message: Message,
     db: Database,
     rag: RAGService,
-    notifier: ManagerNotifier,
+    view_notifier: ViewNotifier,
     settings: Settings,
     history: DialogueHistory,
 ) -> None:
@@ -96,4 +95,4 @@ async def on_question(
             link_preview_options=LinkPreviewOptions(is_disabled=True),
         )
 
-    await maybe_notify_view(db, notifier, settings, user, question)
+    await view_notifier.track(user)
