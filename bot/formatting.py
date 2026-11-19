@@ -47,6 +47,40 @@ def to_telegram_html(text: str) -> str:
     return escaped.strip()
 
 
+_TAG_RE = re.compile(r"<[^>]+>")
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]+\)")
+_URL_RE = re.compile(r"(?:https?://|www\.)\S+", re.IGNORECASE)
+_TG_LINK_RE = re.compile(r"\b(?:t|telegram)\.me/\S+", re.IGNORECASE)
+_DOMAIN_RE = re.compile(
+    r"(?<![@\w.-])(?:[a-z0-9-]+\.)+(?:ru|com|net|org|io|dev|tech|cloud|site|shop|store)\b",
+    re.IGNORECASE,
+)
+_HANDLE_RE = re.compile(r"(?<![\w@])@[A-Za-z][A-Za-z0-9_]{2,31}\b")
+
+
+def to_plain_text(text: str) -> str:
+    """HTML/markdown → обычный текст и полное удаление ссылок.
+
+    Нужно для ответов на сайте: там нельзя показывать URL и разметку.
+    """
+    text = _MD_LINK_RE.sub(r"\1", text)
+    text = _TAG_RE.sub("", text)
+    text = html.unescape(text)
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text, flags=re.S)
+    text = re.sub(r"(?m)^\s*#{1,6}\s*", "", text)
+    text = text.replace("`", "")
+    text = _URL_RE.sub("", text)
+    text = _TG_LINK_RE.sub("", text)
+    text = _DOMAIN_RE.sub("", text)
+    text = _HANDLE_RE.sub("", text)
+    text = re.sub(r"\(\s*\)", "", text)
+    text = re.sub(r"\[\s*\]", "", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    text = re.sub(r"[ \t]+([.,;:!?])", r"\1", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
 def format_user(user: TelegramUser | None) -> str:
     if user is None:
         return "—"

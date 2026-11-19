@@ -1,8 +1,9 @@
 # Telegram-бот Ensi Cloud (RAG) — каркас
 
-Бот-ассистент по сайту [ensi.cloud](https://ensi.cloud/): отвечает на базовые вопросы
-по продуктам, тарифам, кейсам и внедрению, предлагает записаться на бесплатный
-экспресс-аудит и отправляет уведомления менеджерам.
+Бот-ассистент по сайтам [ensi.cloud](https://ensi.cloud/) и [ensi.tech](https://ensi.tech/):
+отвечает на базовые вопросы по продуктам, тарифам, кейсам и внедрению, предлагает записаться
+на бесплатный экспресс-аудит и отправляет уведомления менеджерам. Те же ответы можно
+отдавать в чате на сайте через HTTP API — без Telegram и без ссылок.
 
 Стек: **Python 3.11+**, **aiogram 3**, **SQLite**, гибридный поиск **BM25 + эмбеддинги**,
 любой **OpenAI-совместимый** LLM API (OpenAI, DeepSeek, OpenRouter, vLLM, Ollama).
@@ -25,6 +26,8 @@
 - **Разные меню команд**: обычные пользователи видят только базовые команды, менеджеры —
   ещё историю запросов, админы — полный служебный набор. Меню ставится персонально
   через `BotCommandScopeChat` и не светится у клиентов.
+- **HTTP API для сайта**: `POST /api/chat` отдаёт тот же RAG-ответ обычным текстом,
+  без ссылок и разметки. Может работать вообще без Telegram (`BOT_TOKEN` пуст).
 - **Инжест сайтов**: краулер с `sitemap.xml` для ensi.cloud и ensi.tech, очистка
   Tilda-разметки, нарезка на чанки, эмбеддинги, инкрементальное обновление по хешу.
 - Всё, что нужно для старта: `.env.example`, Dockerfile, тесты.
@@ -36,6 +39,7 @@
 ```
 bot/
   main.py              # точка входа, сборка зависимостей, polling
+  api.py               # HTTP API для чата на сайте
   commands.py          # меню команд: публичное, менеджеры, админы
   config.py            # настройки из .env
   db.py                # SQLite: пользователи, события, заявки, вопросы, чанки
@@ -48,6 +52,7 @@ bot/
   formatting.py        # HTML/экранирование/обрезка
   services/analytics.py # события «зашёл», «что искал», пересказ запросов
   services/view_notifier.py # серия вопросов: уведомление по порогу или тишине
+  services/web_chat.py # ответы для сайта: plain text без ссылок
   services/access.py   # кто менеджер/админ (доступ к истории и админке)
   handlers/
     start.py           # /start /help /reset /id
@@ -79,6 +84,7 @@ pip install -r requirements.txt
 
 copy .env.example .env
 # откройте .env и заполните BOT_TOKEN (от @BotFather)
+# для чата на сайте достаточно API_ENABLED=true, BOT_TOKEN можно оставить пустым
 
 # 1) собрать базу знаний с обоих сайтов
 python -m bot.rag.ingest --max-pages 150
@@ -126,7 +132,10 @@ python -m bot.rag.ingest --dry-run --max-pages 5
 python -m bot.rag.ingest                  # ensi.cloud + ensi.tech + sitemap.xml
 python -m bot.rag.ingest --reset          # пересобрать с нуля
 python -m bot.rag.ingest --sites https://ensi.tech   # только один сайт
-python -m bot.rag.ingest --max-pages 250  # глубже
+python -m bot.rag.ingest --page https://ensi.tech/solutions/pim   # одна страница
+python -m bot.rag.ingest --max-pages 200  # лимит страниц за запуск
+python -m bot.rag.ingest --only-new       # не тратить лимит на уже собранные
+python -m bot.rag.ingest --exclude /contacts /resources/*   # разовый блок-лист
 python -m bot.rag.ingest --no-embeddings  # только BM25 (без затрат на API)
 python -m bot.rag.ingest --force          # переиндексировать всё
 python -m bot.rag.ingest --dry-run        # посмотреть, что соберётся
@@ -137,6 +146,38 @@ python -m bot.rag.ingest --dry-run        # посмотреть, что соб�
   досчитает векторы.
 - После инжеста перезапустите бота — индекс читается при старте.
 - Регламент: обновлять раз в сутки/неделю по cron или вручную после правок сайта.
+
+### Лимит страниц и блок-лист
+
+- `INGEST_MAX_PAGES` (по умолчанию **200**) — сколько страниц максимум обрабатывать
+  за один запуск. Переопределяется `--max-pages`, например `--max-pages 300`.
+- Если в sitemap больше страниц, чем лимит, запускайте с `--only-new`: уже собранные
+  URL не скачиваются и не съедают лимит, поэтому следующий запуск доберёт следующие.
+  Для обновления контента периодически запускайте без `--only-new`.
+- Блок-лист: `BLOCKED_PATHS` в `.env` или `--exclude` для разового запуска.
+  Поддерживаются пути, полные URL и wildcard:
+
+  ```env
+  BLOCKED_PATHS=/contacts,/resources/backlog,/resources/*,https://ensi.tech/price
+  ```
+
+  Правило срабатывает и на саму страницу, и на всё, что ниже (`/contacts` заблокирует
+  `/contacts/ivan`). Блок-лист общий для всех сайтов; если нужно по-разному — запускайте
+  инжест отдельно с `--sites` и своим `--exclude`.
+
+### Отдельная страница без обхода ссылок
+
+`--page` парсит ровно указанные страницы: sitemap не читается, ссылки с них не обходятся,
+`--max-depth` игнорируется. Блок-лист при этом продолжает действовать.
+
+```powershell
+python -m bot.rag.ingest --page https://ensi.tech/solutions/pim
+python -m bot.rag.ingest --page https://ensi.tech/price https://ensi.cloud/tariffs
+python -m bot.rag.ingest --page https://ensi.tech/price --force   # обновить страницу
+```
+
+Флаг можно повторять: `--page URL1 --page URL2`. Для проверки без записи добавьте
+`--dry-run`.
 
 Полезные ключи `.env`: `SITE_BASE_URL`, `EXTRA_SITES` (дополнительные сайты через запятую),
 `SEED_URLS` (свои стартовые URL; если заданы — sitemap не читается, обход идёт от них),
@@ -153,7 +194,10 @@ python -m bot.rag.ingest --dry-run        # посмотреть, что соб�
 | `MANAGER_TOPIC_ID` | тема в супергруппе (опционально) |
 | `ADMIN_IDS` | доступ к `/stats`, `/users`, `/leads`, `/knowledge`, `/test_notify` |
 | `SITE_BASE_URL` | основной сайт для ссылок и текстов бота |
-| `EXTRA_SITES` | дополнительные сайты-источники знаний (по умолчанию ensi.tech) |
+| `EXTRA_SITES` | дополнительные сайты-источники знаний (по умолчанию ensi.tech); указывайте домены, пути отбрасываются |
+| `SEED_URLS` | свои стартовые URL (sitemap при этом не читается) |
+| `BLOCKED_PATHS` | пути, которые не парсить (через запятую, можно `*`) |
+| `INGEST_MAX_PAGES` | лимит страниц за один запуск инжеста (200) |
 | `NOTIFY_ON_SIGNUP` / `NOTIFY_ON_VIEW` | включают уведомления о заходе/вопросах |
 | `N_QUESTIONS` | порог: уведомить, если вопросов в серии больше N |
 | `VIEW_NOTIFY_IDLE_MINUTES` | уведомить после N минут тишины (по умолчанию 5) |
@@ -163,6 +207,12 @@ python -m bot.rag.ingest --dry-run        # посмотреть, что соб�
 | `RAG_TOP_K`, `RAG_MIN_SCORE` | сколько фрагментов брать и порог близости |
 | `RATE_LIMIT_SECONDS`, `HISTORY_TURNS` | антифлуд и память диалога |
 | `CONTACT_TELEGRAM`, `CONTACT_PHONE` | контакты в ответах |
+| `API_ENABLED` | поднять HTTP API для сайта |
+| `API_HOST`, `API_PORT` | адрес и порт API (по умолчанию 127.0.0.1:8080) |
+| `API_TOKEN` | секрет для `X-API-Key` / `Bearer` (опционально) |
+| `API_CORS_ORIGINS` | домены сайта через запятую или `*` |
+| `API_RATE_LIMIT_PER_MINUTE` | лимит запросов на IP (0 — без лимита) |
+| `API_MAX_QUESTION_CHARS`, `API_MAX_ANSWER_CHARS` | ограничения длины |
 
 Примеры провайдеров:
 
@@ -198,6 +248,87 @@ EMBEDDING_MODEL=nomic-embed-text
    на страницы-источники.
 5. Если ничего не найдено — бот честно говорит об этом и предлагает аудит/менеджера.
    Если LLM недоступна — отдаёт выдержки из сайта с пометкой.
+
+---
+
+## Чат на сайте (HTTP API)
+
+Тот же RAG можно использовать не в Telegram, а в чате на сайте. HTTP-сервер поднимается
+в одном процессе с ботом; если `BOT_TOKEN` пуст — Telegram полностью отключается,
+а API продолжает работать.
+
+```env
+API_ENABLED=true
+API_HOST=127.0.0.1          # 0.0.0.0 — только за nginx/HTTPS и с токеном
+API_PORT=8080
+API_TOKEN=                  # секрет; клиент шлёт X-API-Key или Bearer
+API_CORS_ORIGINS=https://ensi.cloud,https://ensi.tech
+API_RATE_LIMIT_PER_MINUTE=20
+```
+
+### Запрос
+
+```http
+POST /api/chat
+Content-Type: application/json
+X-API-Key: <API_TOKEN>
+
+{"question": "Что такое PIM?", "session_id": "visitor-42"}
+```
+
+- `session_id` необязателен: сервер вернёт его в ответе. Передавайте то же значение
+  в следующих запросах — бот будет помнить контекст диалога.
+- Если `API_TOKEN` задан, без него вернётся `401`.
+
+Ответ:
+
+```json
+{
+  "ok": true,
+  "answer": "PIM — это система управления каталогом и данными о товарах...",
+  "session_id": "visitor-42",
+  "degraded": false,
+  "used_context": true
+}
+```
+
+- **Ссылок нет.** Для сайта используется отдельный промпт, URL убираются из контекста,
+  а ответ дополнительно чистится от HTML, markdown, ссылок и доменов. Поля `sources`
+  в ответе нет.
+- `degraded: true` — LLM недоступна или вернула ошибку, ответ собран из выдержек.
+- `GET /health` → `{"status":"ok","documents":...,"vectors":...,"llm":true}`.
+
+### Примеры
+
+PowerShell:
+
+```powershell
+$body = @{ question = "Что такое PIM?"; session_id = "visitor-42" } | ConvertTo-Json
+Invoke-RestMethod -Uri http://127.0.0.1:8080/api/chat -Method Post `
+  -ContentType "application/json" -Headers @{ "X-API-Key" = "secret" } -Body $body
+```
+
+JavaScript на сайте:
+
+```js
+const response = await fetch("https://bot.example.com/api/chat", {
+  method: "POST",
+  headers: { "Content-Type": "application/json", "X-API-Key": "secret" },
+  body: JSON.stringify({ question, session_id: chatSessionId }),
+});
+const data = await response.json();
+if (data.ok) renderMessage(data.answer); // чистый текст без ссылок
+```
+
+### Безопасность и эксплуатация
+
+- Не выставляйте `API_HOST=0.0.0.0` без `API_TOKEN`; предпочтительно держать API
+  на `127.0.0.1` и проксировать через nginx с HTTPS.
+- `API_CORS_ORIGINS` ограничьте доменами сайта, если запросы идут из браузера.
+- Встроенный лимит — `API_RATE_LIMIT_PER_MINUTE` на IP (0 отключает).
+- Вопросы с сайта логируются в `query_log` с синтетическими отрицательными ID и событием
+  `web_question`; уведомления менеджерам в Telegram при этом не отправляются.
+- После изменения базы знаний перезапустите процесс — индекс читается при старте.
 
 ---
 
@@ -270,10 +401,12 @@ Telegram не поддерживает «меню для списка ID», но
 
 ```bash
 docker build -t ensi-bot .
-docker run --rm --env-file .env -v "$PWD/data:/app/data" ensi-bot
+docker run --rm -p 8080:8080 -e API_HOST=0.0.0.0 \
+  --env-file .env -v "$PWD/data:/app/data" ensi-bot
 ```
 
 Базу знаний удобнее собрать на хосте (`python -m bot.rag.ingest`) и примонтировать `data/`.
+Для API в контейнере обязателен `API_HOST=0.0.0.0`, иначе порт не будет виден снаружи.
 
 Для продакшена: `restart: unless-stopped`, логи в journald/файл, отдельный volume под `data/`.
 

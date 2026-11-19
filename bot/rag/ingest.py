@@ -4,6 +4,7 @@
     python -m bot.rag.ingest
     python -m bot.rag.ingest --reset --max-pages 150
     python -m bot.rag.ingest --sites https://ensi.tech --max-pages 20
+    python -m bot.rag.ingest --page https://ensi.tech/solutions/pim
     python -m bot.rag.ingest --dry-run --max-pages 5
 """
 
@@ -25,6 +26,7 @@ from ..db import Database, NewChunk
 from ..llm import EmbeddingClient
 from .chunker import split_text
 from .crawler import EXCLUDE_PATH_PATTERNS, USER_AGENT, SiteCrawler, normalize_url
+from .filters import path_patterns
 
 logger = logging.getLogger(__name__)
 
@@ -99,8 +101,26 @@ async def ingest(args: argparse.Namespace, settings: Settings) -> int:
     db = Database(args.db or settings.db_path)
     db.migrate()
 
+    # --page: строго указанные страницы, без sitemap и перехода по ссылкам.
+    single_page_mode = bool(args.page)
+    page_seeds: list[str] = []
+    if single_page_mode:
+        page_seeds = [url for url in (normalize_url(raw) for raw in (args.page or [])) if url]
+        if not page_seeds:
+            print("Не удалось разобрать URL из --page.")
+            db.close()
+            return 1
+        if args.urls:
+            print("--page задан: --urls игнорируется.")
+        if args.sites:
+            print("--page задан: --sites игнорируется.")
+
     # SEED_URLS/--urls полностью управляют списком страниц и сайтов.
-    custom_seeds = [url for url in (normalize_url(raw) for raw in (args.urls or settings.custom_seeds)) if url]
+    custom_seeds = (
+        page_seeds
+        if single_page_mode
+        else [url for url in (normalize_url(raw) for raw in (args.urls or settings.custom_seeds)) if url]
+    )
     if custom_seeds:
         sites = list(dict.fromkeys(_origin(url) for url in custom_seeds))
         seeds_by_site: dict[str, list[str]] = {site: [] for site in sites}
@@ -120,10 +140,16 @@ async def ingest(args: argparse.Namespace, settings: Settings) -> int:
         if embeddings_off:
             print("Эмбеддинги выключены — будет только лексический поиск (BM25).")
 
+        blocked = [*settings.blocked_path_list, *(args.exclude or [])]
+        extra_patterns = path_patterns(blocked)
+        exclude_patterns = (*EXCLUDE_PATH_PATTERNS, *extra_patterns)
+        if blocked:
+            print(f"Исключено путей: {len(blocked)}.")
+
         counter: Counter[str] = Counter()
         total_chunks = 0
         vectors_used = False
-        remaining = args.max_pages
+        remaining = args.max_pages or settings.ingest_max_pages
 
         print(f"Источники: {', '.join(sites)}. Лимит: {remaining} страниц.\n")
 
@@ -133,27 +159,46 @@ async def ingest(args: argparse.Namespace, settings: Settings) -> int:
                 break
 
             seeds = list(seeds_by_site.get(site, []))
+            sitemap_count = 0
             if not args.no_sitemap and not custom_seeds:
                 sitemap_urls = await load_sitemap(session, site)
+                sitemap_count = len(sitemap_urls)
                 if sitemap_urls:
-                    logger.info("%s: sitemap.xml — %s URL", site, len(sitemap_urls))
+                    logger.info("%s: sitemap.xml — %s URL", site, sitemap_count)
                     seeds.extend(sitemap_urls)
-            seeds = _filter_seeds(seeds, EXCLUDE_PATH_PATTERNS)
+            raw_seed_count = len(seeds)
+            seeds = _filter_seeds(seeds, exclude_patterns)
+            filtered_out = raw_seed_count - len(seeds)
+
+            if args.only_new:
+                fresh = [url for url in seeds if db.document_hash(url) is None]
+                skipped_known = len(seeds) - len(fresh)
+                if skipped_known:
+                    counter["known"] += skipped_known
+                    print(f"  · {site}: уже собрано, пропущено — {skipped_known}")
+                seeds = fresh
+
             if not seeds:
                 print(f"\n{site}: нет страниц для обхода, пропуск.")
                 continue
 
             counter["sites"] += 1
-            print(f"\n=== {site}: {len(seeds)} стартовых URL, осталось страниц: {remaining} ===")
+            mode = "только указанные страницы" if single_page_mode else "обход сайта"
+            print(
+                f"\n=== {site}: {len(seeds)} стартовых URL "
+                f"(sitemap: {sitemap_count}, отфильтровано: {filtered_out}, режим: {mode}), "
+                f"осталось страниц: {remaining} ==="
+            )
             crawler = SiteCrawler(
                 site,
                 session,
                 max_pages=remaining,
-                max_depth=args.max_depth,
+                max_depth=0 if single_page_mode else args.max_depth,
                 delay=args.delay,
+                exclude_patterns=exclude_patterns,
             )
 
-            async for page in crawler.crawl(seeds):
+            async for page in crawler.crawl(seeds, follow_links=not single_page_mode):
                 remaining -= 1
                 counter["pages"] += 1
                 chunks = split_text(page.text, args.max_chars, args.overlap)
@@ -210,6 +255,7 @@ async def ingest(args: argparse.Namespace, settings: Settings) -> int:
                 f"\n  источников: {counter['sites']}"
                 f"\n  страниц обработано: {counter['pages']}"
                 f"\n  сохранено: {counter['saved']}, без изменений: {counter['unchanged']}, пустых: {counter['empty']}"
+                f"\n  уже собрано (пропущено): {counter['known']}"
                 f"\n  чанков в базе: {stats['chunks']} (добавлено сейчас: {total_chunks})"
                 f"\n  документов в базе: {stats['documents']}"
                 f"\n  эмбеддинги: {'да' if vectors_used else 'нет'}"
@@ -227,8 +273,31 @@ def build_parser() -> argparse.ArgumentParser:
         description="Собирает сайты Ensi в локальную базу знаний для RAG-бота.",
     )
     parser.add_argument("--urls", nargs="*", help="Стартовые URL; заменяют сайты, seed'ы и sitemap.")
+    parser.add_argument(
+        "--page",
+        "--pages",
+        nargs="+",
+        action="extend",
+        metavar="URL",
+        help="Спарсить только указанные страницы: без sitemap и без перехода по ссылкам.",
+    )
     parser.add_argument("--sites", nargs="*", help="Сайты-источники, например https://ensi.cloud https://ensi.tech.")
-    parser.add_argument("--max-pages", type=int, default=150, help="Максимум страниц за один запуск.")
+    parser.add_argument(
+        "--max-pages",
+        type=int,
+        default=None,
+        help="Максимум страниц за запуск (по умолчанию INGEST_MAX_PAGES).",
+    )
+    parser.add_argument(
+        "--exclude",
+        nargs="*",
+        help="Пути, которые не парсить: /contacts /resources/* (дополняет BLOCKED_PATHS).",
+    )
+    parser.add_argument(
+        "--only-new",
+        action="store_true",
+        help="Пропускать уже собранные URL, не тратя на них лимит страниц.",
+    )
     parser.add_argument("--max-depth", type=int, default=1, help="Глубина обхода ссылок от стартовых страниц.")
     parser.add_argument("--max-chars", type=int, default=1200, help="Максимальная длина чанка.")
     parser.add_argument("--overlap", type=int, default=150, help="Перекрытие чанков, символов.")

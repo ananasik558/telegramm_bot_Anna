@@ -16,4 +16,6 @@ COPY README.md ./
 
 RUN mkdir -p /app/data
 
+EXPOSE 8080
+
 CMD ["python", "-m", "bot"]

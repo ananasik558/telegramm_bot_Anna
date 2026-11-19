@@ -26,7 +26,7 @@ def _settings(**kwargs) -> Settings:
         "view_notify_idle_minutes": 0.003,  # ~0.18 c
     }
     values.update(kwargs)
-    return Settings(**values)
+    return Settings(_env_file=None, **values)
 
 
 def _user() -> TelegramUser:

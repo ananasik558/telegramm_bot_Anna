@@ -7,7 +7,7 @@ from bot.config import Settings
 def _settings(**kwargs) -> Settings:
     values = {"manager_chat_ids": "", "admin_ids": ""}
     values.update(kwargs)
-    return Settings(**values)
+    return Settings(_env_file=None, **values)
 
 
 def _names(commands) -> set[str]:
